@@ -10,6 +10,7 @@ This class starts with very simple logic:
 """
 
 from typing import List, Dict, Tuple, Optional
+import re
 
 from dataset import POSITIVE_WORDS, NEGATIVE_WORDS
 
@@ -52,8 +53,30 @@ class MoodAnalyzer:
           - Handle simple emojis separately (":)", ":-(", "🥲", "😂")
           - Normalize repeated characters ("soooo" -> "soo")
         """
+        # Basic cleanup
         cleaned = text.strip().lower()
+
+        # Map common emoticons/emojis to word tokens so they act as signals.
+        emoticon_map = {
+          ":)": "smile",
+          ":-)": "smile",
+          ":(": "frown",
+          ":-(": "frown",
+          "😂": "joy",
+          "🥲": "sad_smile",
+          "💀": "skull",
+        }
+        for k, v in emoticon_map.items():
+          cleaned = cleaned.replace(k, f" {v} ")
+
+        # Remove punctuation (keep letters, numbers, underscore and whitespace)
+        cleaned = re.sub(r"[^a-z0-9_\s]", " ", cleaned)
+
+        # Split into tokens
         tokens = cleaned.split()
+
+        # Normalize repeated characters: collapse 3+ repeats to 2 (soooo -> soo)
+        tokens = [re.sub(r"(.)\1{2,}", r"\1\1", t) for t in tokens]
 
         return tokens
 
@@ -75,15 +98,54 @@ class MoodAnalyzer:
           - Give some words higher weights than others (for example "hate" < "annoyed")
           - Treat emojis or slang (":)", "lol", "💀") as strong signals
         """
-        # TODO: Implement this method.
-        #   1. Call self.preprocess(text) to get tokens.
-        #   2. Loop over the tokens.
-        #   3. Increase the score for positive words, decrease for negative words.
-        #   4. Return the total score.
-        #
-        # Hint: if you implement negation, you may want to look at pairs of tokens,
-        # like ("not", "happy") or ("never", "fun").
-        pass
+        # Basic scoring with two improvements:
+        # 1) Handle simple negation words that invert the next token's polarity.
+        # 2) Treat common emoji/emoticon tokens as stronger signals.
+        tokens = self.preprocess(text)
+
+        negation_tokens = {"not", "never", "no", "n't"}
+
+        # stronger weights for emotion tokens created in preprocess
+        emoji_weights = {
+          "joy": 2,
+          "smile": 1,
+          "sad_smile": -1,
+          "frown": -1,
+          "skull": -2,
+        }
+
+        score = 0
+        i = 0
+        while i < len(tokens):
+          t = tokens[i]
+
+          # handle simple negation by looking at the next token
+          if t in negation_tokens and i + 1 < len(tokens):
+            nxt = tokens[i + 1]
+            if nxt in self.positive_words:
+              score -= 1
+              i += 2
+              continue
+            if nxt in self.negative_words:
+              score += 1
+              i += 2
+              continue
+
+          # emoji/emoticon tokens
+          if t in emoji_weights:
+            score += emoji_weights[t]
+            i += 1
+            continue
+
+          # regular word matches (count each occurrence)
+          if t in self.positive_words:
+            score += 1
+          if t in self.negative_words:
+            score -= 1
+
+          i += 1
+
+        return score
 
     # ---------------------------------------------------------------------
     # Label prediction
@@ -105,12 +167,17 @@ class MoodAnalyzer:
         Just remember that whatever labels you return should match the labels
         you use in TRUE_LABELS in dataset.py if you care about accuracy.
         """
-        # TODO: Implement this method.
-        #   1. Call self.score_text(text) to get the numeric score.
-        #   2. Return "positive" if the score is above 0.
-        #   3. Return "negative" if the score is below 0.
-        #   4. Return "neutral" otherwise.
-        pass
+        score = self.score_text(text)
+
+        # Map numeric score to labels. Use "mixed" for weak signals.
+        if score > 1:
+          return "positive"
+        if score < -1:
+          return "negative"
+        if score == 0:
+          return "neutral"
+        # score is either 1 or -1 -> ambiguous/mixed
+        return "mixed"
 
     # ---------------------------------------------------------------------
     # Explanations (optional but recommended)
